@@ -16,3 +16,11 @@
 [submodule "arbitrator/wasm-testsuite/testsuite"]
 	path = arbitrator/wasm-testsuite/testsuite
 	url = https://github.com/WebAssembly/testsuite.git
+[submodule "4844devnet/geth/go-ethereum"]
+	path = 4844devnet/geth/go-ethereum
+	url = https://github.com/mdehoog/go-ethereum
+	branch = eip-4844
+[submodule "4844devnet/prysm/prysm"]
+	path = 4844devnet/prysm/prysm
+	url = https://github.com/Inphi/prysm
+	branch = eip-4844
