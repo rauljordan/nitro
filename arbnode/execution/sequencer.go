@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/big"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +66,7 @@ type SequencerConfig struct {
 	MaxTxDataSize               int                      `koanf:"max-tx-data-size" reload:"hot"`
 	NonceFailureCacheSize       int                      `koanf:"nonce-failure-cache-size" reload:"hot"`
 	NonceFailureCacheExpiry     time.Duration            `koanf:"nonce-failure-cache-expiry" reload:"hot"`
+	TimeBoost                   bool                     `koanf:"time-boost"`
 	Dangerous                   DangerousSequencerConfig `koanf:"dangerous"`
 }
 
@@ -108,6 +110,7 @@ var DefaultSequencerConfig = SequencerConfig{
 	QueueSize:                   1024,
 	QueueTimeout:                time.Second * 12,
 	NonceCacheSize:              1024,
+	TimeBoost:                   false,
 	Dangerous:                   DefaultDangerousSequencerConfig,
 	// 95% of the default batch poster limit, leaving 5KB for headers and such
 	MaxTxDataSize:           95000,
@@ -144,6 +147,7 @@ func SequencerConfigAddOptions(prefix string, f *flag.FlagSet) {
 	f.Int(prefix+".max-tx-data-size", DefaultSequencerConfig.MaxTxDataSize, "maximum transaction size the sequencer will accept")
 	f.Int(prefix+".nonce-failure-cache-size", DefaultSequencerConfig.NonceFailureCacheSize, "number of transactions with too high of a nonce to keep in memory while waiting for their predecessor")
 	f.Duration(prefix+".nonce-failure-cache-expiry", DefaultSequencerConfig.NonceFailureCacheExpiry, "maximum amount of time to wait for a predecessor before rejecting a tx with nonce too high")
+	f.Bool(prefix+".time-boost", DefaultSequencerConfig.TimeBoost, "enables time boosted transactions")
 	DangerousSequencerConfigAddOptions(prefix+".dangerous", f)
 }
 
@@ -154,6 +158,19 @@ type txQueueItem struct {
 	returnedResult  bool
 	ctx             context.Context
 	firstAppearance time.Time
+}
+
+type txWithArrivalTime struct {
+	tx        *types.Transaction
+	timestamp time.Time
+}
+
+func (t *txWithArrivalTime) PriorityFee() uint64 {
+	return t.tx.GasTipCap().Uint64()
+}
+
+func (t *txWithArrivalTime) Timestamp() time.Time {
+	return t.timestamp
 }
 
 func (i *txQueueItem) returnResult(err error) {
@@ -815,11 +832,18 @@ func (s *Sequencer) createBlock(ctx context.Context) (returnValue bool) {
 	s.nonceCache.Resize(config.NonceCacheSize) // Would probably be better in a config hook but this is basically free
 	s.nonceCache.BeginNewBlock()
 	queueItems = s.precheckNonces(queueItems)
-	txes := make([]*types.Transaction, len(queueItems))
+	timestampedTxs := make([]*txWithArrivalTime, len(queueItems))
 	hooks := s.makeSequencingHooks()
 	hooks.ConditionalOptionsForTx = make([]*arbitrum_types.ConditionalOptions, len(queueItems))
+	txes := make([]*types.Transaction, len(queueItems))
 	for i, queueItem := range queueItems {
 		txes[i] = queueItem.tx
+		if s.config().TimeBoost {
+			timestampedTxs[i] = &txWithArrivalTime{
+				tx:        queueItem.tx,
+				timestamp: queueItem.firstAppearance,
+			}
+		}
 		hooks.ConditionalOptionsForTx[i] = queueItem.options
 	}
 
@@ -850,6 +874,16 @@ func (s *Sequencer) createBlock(ctx context.Context) (returnValue bool) {
 		Timestamp:   uint64(timestamp),
 		RequestId:   nil,
 		L1BaseFee:   nil,
+	}
+
+	if s.config().TimeBoost {
+		boostable := NewTimeBoost(timestampedTxs)
+		sort.Sort(boostable)
+		boosted := make([]*types.Transaction, len(boostable.txs))
+		for i, item := range boostable.txs {
+			boosted[i] = item.tx
+		}
+		txes = boosted
 	}
 
 	start := time.Now()
