@@ -68,7 +68,6 @@ func TestSequencerFeed_TimeBoost(t *testing.T) {
 	}
 
 	// Send out 10 boosted transactions concurrently.
-
 	var wg sync.WaitGroup
 	wg.Add(10)
 	for i := range txs {
