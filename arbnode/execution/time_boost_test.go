@@ -210,11 +210,87 @@ func TestTimeBoost(t *testing.T) {
 }
 
 func TestTimeBoostable_computeBoostDelta(t *testing.T) {
-
+	tests := []struct {
+		name        string
+		gFactor     uint64
+		cFactor     uint64
+		priorityFee uint64
+		want        int64
+	}{
+		{
+			name:        "0 priority fee",
+			gFactor:     500,
+			cFactor:     100,
+			priorityFee: 0,
+			want:        0,
+		},
+		{
+			name:        "0 const factor gives g factor boost",
+			gFactor:     500,
+			cFactor:     0,
+			priorityFee: 100,
+			want:        500,
+		},
+		{
+			name:        "const factor == g factor gives half g factor boost",
+			gFactor:     500,
+			cFactor:     100,
+			priorityFee: 100,
+			want:        250,
+		},
+		{
+			name:        "approaches g factor but does not reach it (asymptote)",
+			gFactor:     500,
+			cFactor:     100,
+			priorityFee: 100000,
+			want:        499,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tb := &TimeBoostable[*mockTx]{
+				gFactor:     tt.gFactor,
+				constFactor: tt.cFactor,
+			}
+			if got := tb.computeBoostDelta(tt.priorityFee); got != tt.want {
+				t.Errorf("computeBoostDelta() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestTimeBoostable_canBoost(t *testing.T) {
-
+	tests := []struct {
+		name string
+		tx   *mockTx
+		want bool
+	}{
+		{
+			name: "already boosted",
+			tx:   &mockTx{alreadyBoosted: true},
+			want: false,
+		},
+		{
+			name: "no priority fee",
+			tx:   &mockTx{alreadyBoosted: false, priorityFee: 0},
+			want: false,
+		},
+		{
+			name: "priority fee, not already boosted",
+			tx:   &mockTx{alreadyBoosted: false, priorityFee: 1},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tb := NewTimeBoostable(
+				[]*mockTx{tt.tx},
+			)
+			if got := tb.canBoost(tt.tx); got != tt.want {
+				t.Errorf("canBoost() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func Test_saturatingSub(t *testing.T) {
