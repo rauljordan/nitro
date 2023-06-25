@@ -144,13 +144,13 @@ func TestTimeBoost(t *testing.T) {
 			}
 		}
 	})
-	t.Run("all boosted, results in ordering by bid", func(t *testing.T) {
+	t.Run("all boosted with close timestamps results in ordering by bid", func(t *testing.T) {
 		gFactor := uint64(500)
 		cFactor := uint64(200)
 		txes := []*mockTx{
-			{priorityFee: 300, timestamp: 800},
-			{priorityFee: 200, timestamp: 1000},
-			{priorityFee: 400, timestamp: 1200},
+			{priorityFee: 300, timestamp: 1000},
+			{priorityFee: 200, timestamp: 1001},
+			{priorityFee: 400, timestamp: 1002},
 		}
 		want := []*mockTx{
 			{priorityFee: 400},
@@ -176,16 +176,25 @@ func TestTimeBoost(t *testing.T) {
 	})
 	t.Run("intercalated", func(t *testing.T) {
 		txes := []*mockTx{
-			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 0, timestamp: 700},
 			{priorityFee: 100, timestamp: 1200},
-			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 0, timestamp: 1001},
 			{priorityFee: 400, timestamp: 1200},
-			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 0, timestamp: 1002},
 			{priorityFee: 200, timestamp: 1200},
 			{priorityFee: 0, timestamp: 1000},
 			{priorityFee: 200, timestamp: 1200},
 		}
-		want := []*mockTx{}
+		want := []*mockTx{
+			{priorityFee: 0, timestamp: 700},
+			{priorityFee: 400, timestamp: 800},
+			{priorityFee: 200, timestamp: 867},
+			{priorityFee: 200, timestamp: 867},
+			{priorityFee: 100, timestamp: 950},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 0, timestamp: 1001},
+			{priorityFee: 0, timestamp: 1002},
+		}
 		tb := NewTimeBoostable(
 			txes,
 			WithMaxBoostFactor[*mockTx](500),
