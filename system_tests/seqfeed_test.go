@@ -37,6 +37,44 @@ func newBroadcastClientConfigTest(port int) *broadcastclient.Config {
 	}
 }
 
+func TestSequencerFeed_TimeBoost(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	seqNodeConfig := arbnode.ConfigDefaultL2Test()
+	seqNodeConfig.Sequencer.TimeBoost = true
+
+	seqNodeConfig.Feed.Output = *newBroadcasterConfigTest()
+
+	l2info1, nodeA, client1 := CreateTestL2WithConfig(t, ctx, nil, seqNodeConfig, true)
+	defer nodeA.StopAndWait()
+	clientNodeConfig := arbnode.ConfigDefaultL2Test()
+	port := nodeA.BroadcastServer.ListenerAddr().(*net.TCPAddr).Port
+	clientNodeConfig.Feed.Input = *newBroadcastClientConfigTest(port)
+
+	_, nodeB, client2 := CreateTestL2WithConfig(t, ctx, nil, clientNodeConfig, false)
+	defer nodeB.StopAndWait()
+
+	l2info1.GenerateAccount("User2")
+
+	tx := l2info1.PrepareTx("Owner", "User2", l2info1.TransferGas, big.NewInt(1e12), nil)
+
+	err := client1.SendTransaction(ctx, tx)
+	Require(t, err)
+
+	_, err = EnsureTxSucceeded(ctx, client1, tx)
+	Require(t, err)
+
+	_, err = WaitForTx(ctx, client2, tx.Hash(), time.Second*5)
+	Require(t, err)
+	l2balance, err := client2.BalanceAt(ctx, l2info1.GetAddress("User2"), nil)
+	Require(t, err)
+	if l2balance.Cmp(big.NewInt(1e12)) != 0 {
+		t.Fatal("Unexpected balance:", l2balance)
+	}
+}
+
 func TestSequencerFeed(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())

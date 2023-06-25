@@ -132,6 +132,7 @@ var TestSequencerConfig = SequencerConfig{
 	MaxTxDataSize:               95000,
 	NonceFailureCacheSize:       1024,
 	NonceFailureCacheExpiry:     time.Second,
+	TimeBoost:                   false,
 }
 
 func SequencerConfigAddOptions(prefix string, f *flag.FlagSet) {
@@ -161,16 +162,36 @@ type txQueueItem struct {
 }
 
 type txWithArrivalTime struct {
-	tx        *types.Transaction
-	timestamp time.Time
+	tx             *types.Transaction
+	timestamp      time.Time
+	lock           sync.RWMutex
+	alreadyBoosted atomic.Bool
 }
 
 func (t *txWithArrivalTime) PriorityFee() uint64 {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
 	return t.tx.GasTipCap().Uint64()
 }
 
+func (t *txWithArrivalTime) Boosted() bool {
+	return t.alreadyBoosted.Load()
+}
+
 func (t *txWithArrivalTime) Timestamp() time.Time {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
 	return t.timestamp
+}
+
+func (t *txWithArrivalTime) UpdateTimestamp(tstamp time.Time) {
+	if t.alreadyBoosted.Load() {
+		return
+	}
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.timestamp = tstamp
+	t.alreadyBoosted.Store(true)
 }
 
 func (i *txQueueItem) returnResult(err error) {
@@ -877,7 +898,7 @@ func (s *Sequencer) createBlock(ctx context.Context) (returnValue bool) {
 	}
 
 	if s.config().TimeBoost {
-		boostable := NewTimeBoost(timestampedTxs)
+		boostable := NewTimeBoostable(timestampedTxs)
 		sort.Sort(boostable)
 		boosted := make([]*types.Transaction, len(boostable.txs))
 		for i, item := range boostable.txs {

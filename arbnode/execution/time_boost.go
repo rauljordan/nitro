@@ -8,6 +8,8 @@ import (
 type PriorityBid interface {
 	PriorityFee() uint64
 	Timestamp() time.Time
+	UpdateTimestamp(time.Time)
+	Boosted() bool
 }
 
 // TimeBoostable represents a group of transactions that can be
@@ -35,9 +37,9 @@ func WithDenominatorConstant[T PriorityBid](cFactor uint64) Opt[T] {
 	}
 }
 
-// NewTimeBoost creates an instance of time boostable transactions
+// NewTimeBoostable creates an instance of time boostable transactions
 // with optional parameters, setting defaults if not provided.
-func NewTimeBoost[T PriorityBid](txs []T, opts ...Opt[T]) *TimeBoostable[T] {
+func NewTimeBoostable[T PriorityBid](txs []T, opts ...Opt[T]) *TimeBoostable[T] {
 	tb := &TimeBoostable[T]{
 		txs:         txs,
 		gFactor:     500,
@@ -54,15 +56,17 @@ func (tb *TimeBoostable[T]) Swap(i, j int) { tb.txs[i], tb.txs[j] = tb.txs[j], t
 func (tb *TimeBoostable[T]) Less(i, j int) bool {
 	a := tb.txs[i]
 	t1 := a.Timestamp().UnixMilli()
-	if a.PriorityFee() != 0 && a.PriorityFee() <= tb.gFactor {
+	if tb.canBoost(a) {
 		delta := tb.computeBoostDelta(a.PriorityFee())
-		t1 -= int64(delta)
+		t1 = int64(saturatingSub(t1, delta))
+		a.UpdateTimestamp(time.UnixMilli(t1))
 	}
 	b := tb.txs[j]
 	t2 := b.Timestamp().UnixMilli()
-	if b.PriorityFee() != 0 && b.PriorityFee() <= tb.gFactor {
+	if tb.canBoost(b) {
 		delta := tb.computeBoostDelta(b.PriorityFee())
-		t2 -= int64(delta)
+		t2 = int64(saturatingSub(t2, delta))
+		b.UpdateTimestamp(time.UnixMilli(t2))
 	}
 	return t1 < t2
 }
@@ -71,4 +75,16 @@ func (tb *TimeBoostable[T]) Less(i, j int) bool {
 // parameters of the timeboostable instance.
 func (tb *TimeBoostable[T]) computeBoostDelta(prioFee uint64) int64 {
 	return int64((prioFee * tb.gFactor) / (prioFee + tb.constFactor))
+}
+
+// Checks if a transaction can be time boosted.
+func (tb *TimeBoostable[T]) canBoost(tx T) bool {
+	return !tx.Boosted() && tx.PriorityFee() != 0
+}
+
+func saturatingSub(a, b int64) uint64 {
+	if a < b {
+		return 0
+	}
+	return uint64(a - b)
 }

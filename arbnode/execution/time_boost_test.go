@@ -12,48 +12,235 @@ var (
 )
 
 type mockTx struct {
-	priorityFee uint64
-	timestamp   int64
+	priorityFee    uint64
+	timestamp      int64
+	alreadyBoosted bool
 }
 
 func (m *mockTx) PriorityFee() uint64  { return m.priorityFee }
 func (m *mockTx) Timestamp() time.Time { return time.UnixMilli(m.timestamp) }
+func (m *mockTx) Boosted() bool        { return m.alreadyBoosted }
+func (m *mockTx) UpdateTimestamp(tstamp time.Time) {
+	if m.alreadyBoosted {
+		return
+	}
+	m.timestamp = tstamp.UnixMilli()
+	m.alreadyBoosted = true
+}
 
 func TestTimeBoost(t *testing.T) {
-	t.Run("normalization", func(t *testing.T) {
-		txes := []*mockTx{
+	t.Run("normalization = no bid no boost", func(t *testing.T) {
+		want := []*mockTx{
 			{priorityFee: 0, timestamp: 100},
 			{priorityFee: 0, timestamp: 200},
 			{priorityFee: 0, timestamp: 300},
 			{priorityFee: 0, timestamp: 400},
 		}
-		tb := NewTimeBoost(txes)
+		tb := NewTimeBoostable(want)
 		sort.Sort(tb)
-		for i := 0; i < len(txes); i++ {
-			if !txEq(txes[i], tb.txs[i]) {
-				t.Fatalf("txes %d not equal: %v != %v", i, txes[i], tb.txs[i])
+		for i := 0; i < len(want); i++ {
+			if !txEq(want[i], tb.txs[i]) {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
 			}
 		}
 	})
-	t.Run("boost simple case", func(t *testing.T) {
-
+	t.Run("max bid", func(t *testing.T) {
+		txes := []*mockTx{
+			{priorityFee: 0, timestamp: 100},
+			{priorityFee: 0, timestamp: 200},
+			{priorityFee: 500, timestamp: 300},
+		}
+		want := []*mockTx{
+			{priorityFee: 500, timestamp: 0},
+			{priorityFee: 0, timestamp: 100},
+			{priorityFee: 0, timestamp: 200},
+		}
+		tb := NewTimeBoostable(txes, WithMaxBoostFactor[*mockTx](500))
+		sort.Sort(tb)
+		for i := 0; i < len(want); i++ {
+			if !txEq(want[i], tb.txs[i]) {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
+			}
+		}
 	})
-	t.Run("not more boost than max g factor", func(t *testing.T) {
-
+	t.Run("bid just high enough to reorder", func(t *testing.T) {
+		txes := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 100, timestamp: 1200},
+		}
+		want := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 100, timestamp: 999},
+			{priorityFee: 0, timestamp: 1000},
+		}
+		// A bid equal to the denominator constant of 100 would mean
+		// the tx gets boosted by half the g factor.
+		// (c * g) / (2c) = g / 2,
+		// which in this case will be 402/2 = 201, just enough to beat out
+		// the tx with timestamp 1000 by 1 millisecond.
+		tb := NewTimeBoostable(
+			txes,
+			WithMaxBoostFactor[*mockTx](402),
+			WithDenominatorConstant[*mockTx](100),
+		)
+		sort.Sort(tb)
+		for i := 0; i < len(want); i++ {
+			if !txEq(want[i], tb.txs[i]) {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
+			}
+		}
 	})
-	t.Run("constant factor effect", func(t *testing.T) {
-
+	t.Run("bid not high enough to reorder", func(t *testing.T) {
+		txes := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 100, timestamp: 1200},
+		}
+		want := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 100, timestamp: 1001},
+		}
+		// A bid equal to the denominator constant of 100 would mean
+		// the tx gets boosted by half the g factor.
+		// (c * g) / (2c) = g / 2,
+		// which in this case will be 398/2 = 199, which is not enough to beat
+		// other txs by 1 millisecond.
+		tb := NewTimeBoostable(
+			txes,
+			WithMaxBoostFactor[*mockTx](398),
+			WithDenominatorConstant[*mockTx](100),
+		)
+		sort.Sort(tb)
+		for i := 0; i < len(want); i++ {
+			if !txEq(want[i], tb.txs[i]) {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
+			}
+		}
 	})
-	t.Run("all boosted", func(t *testing.T) {
-
+	t.Run("cannot boost more than max g factor", func(t *testing.T) {
+		gFactor := uint64(500)
+		txes := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: gFactor * 10, timestamp: 1400},
+		}
+		// Even with a massive priority fee, the max boost factor will be g.
+		want := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: gFactor * 10, timestamp: 1400 - int64(gFactor)},
+			{priorityFee: 0, timestamp: 1000},
+		}
+		tb := NewTimeBoostable(
+			txes,
+			WithMaxBoostFactor[*mockTx](gFactor),
+			WithDenominatorConstant[*mockTx](0),
+		)
+		sort.Sort(tb)
+		for i := 0; i < len(want); i++ {
+			if !txEq(want[i], tb.txs[i]) {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
+			}
+		}
+	})
+	t.Run("all boosted, results in ordering by bid", func(t *testing.T) {
+		gFactor := uint64(500)
+		cFactor := uint64(200)
+		txes := []*mockTx{
+			{priorityFee: 300, timestamp: 800},
+			{priorityFee: 200, timestamp: 1000},
+			{priorityFee: 400, timestamp: 1200},
+		}
+		want := []*mockTx{
+			{priorityFee: 400},
+			{priorityFee: 300},
+			{priorityFee: 200},
+		}
+		tb := NewTimeBoostable(
+			txes,
+			WithMaxBoostFactor[*mockTx](gFactor),
+			WithDenominatorConstant[*mockTx](cFactor),
+		)
+		for i, tx := range txes {
+			t.Logf("Tx %d got %d\n", i, tb.computeBoostDelta(tx.PriorityFee()))
+		}
+		sort.Sort(tb)
+		for i := 0; i < len(want); i++ {
+			a := want[i]
+			b := tb.txs[i]
+			if a.priorityFee != b.priorityFee {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
+			}
+		}
 	})
 	t.Run("intercalated", func(t *testing.T) {
-
+		txes := []*mockTx{
+			{priorityFee: 0, timestamp: 800},
+			{priorityFee: 100, timestamp: 1200},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 400, timestamp: 1200},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 200, timestamp: 1200},
+			{priorityFee: 0, timestamp: 1000},
+			{priorityFee: 200, timestamp: 1200},
+		}
+		want := []*mockTx{}
+		tb := NewTimeBoostable(
+			txes,
+			WithMaxBoostFactor[*mockTx](500),
+			WithDenominatorConstant[*mockTx](100),
+		)
+		sort.Sort(tb)
+		for i := 0; i < len(want); i++ {
+			if !txEq(want[i], tb.txs[i]) {
+				t.Fatalf("txes %d not equal: %v != %v", i, want[i], tb.txs[i])
+			}
+		}
 	})
 }
 
 func TestTimeBoostable_computeBoostDelta(t *testing.T) {
 
+}
+
+func TestTimeBoostable_canBoost(t *testing.T) {
+
+}
+
+func Test_saturatingSub(t *testing.T) {
+	type args struct {
+		a int64
+		b int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want uint64
+	}{
+		{
+			name: "normal",
+			args: args{a: 100, b: 50},
+			want: 50,
+		},
+		{
+			name: "negative",
+			args: args{a: 50, b: 100},
+			want: 0,
+		},
+		{
+			name: "zero",
+			args: args{a: 50, b: 50},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := saturatingSub(tt.args.a, tt.args.b); got != tt.want {
+				t.Errorf("saturatingSub() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func txEq(a, b PriorityBid) bool {
