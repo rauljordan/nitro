@@ -171,6 +171,7 @@ type txWithArrivalTime struct {
 func (t *txWithArrivalTime) PriorityFee() uint64 {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
+	// TODO: Handle gas tip cap not uint64
 	return t.tx.GasTipCap().Uint64()
 }
 

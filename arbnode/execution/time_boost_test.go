@@ -259,6 +259,39 @@ func TestTimeBoostable_computeBoostDelta(t *testing.T) {
 	}
 }
 
+func BenchmarkTimeBoost_10(b *testing.B) {
+	benchBoost(b, 100)
+}
+
+func BenchmarkTimeBoost_100(b *testing.B) {
+	benchBoost(b, 1000)
+}
+
+func BenchmarkTimeBoost_1000(b *testing.B) {
+	benchBoost(b, 1000)
+}
+
+func benchBoost(b *testing.B, numTxs int) {
+	b.Helper()
+	b.StopTimer()
+	txs := make([]*mockTx, numTxs)
+	for i := 0; i < numTxs; i++ {
+		txs[i] = &mockTx{
+			priorityFee: uint64(i),
+			timestamp:   int64(i),
+		}
+	}
+	tb := NewTimeBoostable(
+		txs,
+		WithMaxBoostFactor[*mockTx](500),
+		WithDenominatorConstant[*mockTx](100),
+	)
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		sort.Sort(tb)
+	}
+}
+
 func TestTimeBoostable_canBoost(t *testing.T) {
 	tests := []struct {
 		name string

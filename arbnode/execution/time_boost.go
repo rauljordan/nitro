@@ -43,7 +43,7 @@ func NewTimeBoostable[T PriorityBid](txs []T, opts ...Opt[T]) *TimeBoostable[T] 
 	tb := &TimeBoostable[T]{
 		txs:         txs,
 		gFactor:     500,
-		constFactor: 50, // TODO: Decide
+		constFactor: 100, // TODO: Decide
 	}
 	for _, o := range opts {
 		o(tb)
