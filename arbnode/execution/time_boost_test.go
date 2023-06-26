@@ -334,7 +334,7 @@ func Test_saturatingSub(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want uint64
+		want int64
 	}{
 		{
 			name: "normal",

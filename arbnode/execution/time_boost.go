@@ -58,14 +58,14 @@ func (tb *TimeBoostable[T]) Less(i, j int) bool {
 	t1 := a.Timestamp().UnixMilli()
 	if tb.canBoost(a) {
 		delta := tb.computeBoostDelta(a.PriorityFee())
-		t1 = int64(saturatingSub(t1, delta))
+		t1 = saturatingSub(t1, delta)
 		a.UpdateTimestamp(time.UnixMilli(t1))
 	}
 	b := tb.txs[j]
 	t2 := b.Timestamp().UnixMilli()
 	if tb.canBoost(b) {
 		delta := tb.computeBoostDelta(b.PriorityFee())
-		t2 = int64(saturatingSub(t2, delta))
+		t2 = saturatingSub(t2, delta)
 		b.UpdateTimestamp(time.UnixMilli(t2))
 	}
 	return t1 < t2
@@ -82,9 +82,9 @@ func (tb *TimeBoostable[T]) canBoost(tx T) bool {
 	return !tx.Boosted() && tx.PriorityFee() != 0
 }
 
-func saturatingSub(a, b int64) uint64 {
+func saturatingSub(a, b int64) int64 {
 	if a < b {
 		return 0
 	}
-	return uint64(a - b)
+	return a - b
 }
